@@ -1,0 +1,550 @@
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+  vpcID:
+    Type: String
+  subnetID:
+    Type: String
+  HostedZoneName:
+    Type: String    
+  DBuserName:
+    Type: String
+  DBpassword:
+    Type: String    
+  subnetID1:
+    Type: String
+  subnetID2:
+    Type: String
+  subnetID3:
+    Type: String
+  instanceProfile:
+    Type: String        
+  WebACLName:
+    Type: String
+    Default: CommonAttackProtection
+    Description: Enter the name you want to use for the WebACL. This value is also
+      added as a prefix for the names of the rules, conditions, and CloudWatch metrics
+      created by this template.
+
+Resources:
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+      - Ref: subnetID1
+      - Ref: subnetID2
+      - Ref: subnetID3
+      SecurityGroups:
+      - Ref: LoadBalancerSecurityGroup
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH, HTTP and HTTPS
+      VpcId: !Ref vpcID
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '8080'
+        ToPort: '8080'
+        CidrIp: 0.0.0.0/0
+ 
+  myDNSRecord:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      Comment: Point to loadBalancer
+      HostedZoneName: !Ref HostedZoneName
+      RecordSets:
+      - Name: !Ref HostedZoneName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt ApplicationLoadBalancer.DNSName      
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Certificates:
+        - CertificateArn: arn:aws:acm:us-east-1:398590284929:certificate/9331541b-3c7d-40ff-ac58-35d18d21598a
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: ALBTargetGroup
+      LoadBalancerArn:
+        Ref: ApplicationLoadBalancer
+      Port: '8080'
+      Protocol: HTTPS
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      Port: 8080
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId:
+        Ref: vpcID
+
+
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - codedeploy.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+              - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+
+  CodeDeployApp:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: "MyCodeDeployApp"
+
+
+  CodeDeployGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      ApplicationName: !Ref CodeDeployApp
+      DeploymentGroupName: "MyCodeDeployGroup"
+      ServiceRoleArn: !GetAtt CodeDeployServiceRole.Arn
+      AutoScalingGroups: 
+      - !Ref WebServerGroup
+      Ec2TagFilters:
+        - 
+          Key: "Name"
+          Value:  "MyApp"
+          Type: KEY_AND_VALUE
+
+        
+  WebServerGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+      - Ref: subnetID1
+      - Ref: subnetID2
+      - Ref: subnetID3
+      LaunchConfigurationName:
+        Ref: LaunchConfig
+      MinSize: '3'
+      MaxSize: '10'
+      TargetGroupARNs:
+      - Ref: ALBTargetGroup
+      Tags:
+        -
+          Key: "Name"
+          Value: "MyApp"
+          PropagateAtLaunch: true 
+
+  WebServerScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: WebServerGroup
+      Cooldown: '60'
+      ScalingAdjustment: '1'
+  WebServerScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: WebServerGroup
+      Cooldown: '60'
+      ScalingAdjustment: "-1"
+  CPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale-up if CPU > 30% for 4 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '60'
+      EvaluationPeriods: '1'
+      Threshold: '15'
+      AlarmActions:
+      - Ref: WebServerScaleUpPolicy
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value:
+          Ref: WebServerGroup
+      ComparisonOperator: GreaterThanThreshold
+  CPUAlarmLow:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale-down if CPU < 30% for 4 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '60'
+      EvaluationPeriods: '1'
+      Threshold: '10'
+      AlarmActions:
+      - Ref: WebServerScaleDownPolicy
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value:
+          Ref: WebServerGroup
+      ComparisonOperator: LessThanThreshold
+
+  LaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      InstanceType: t2.micro
+      SecurityGroups:
+      - Ref: WebAppSecurityGroup
+      KeyName:
+        Ref: KeyName
+      ImageId: ami-9887c6e7
+      AssociatePublicIpAddress: true
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - "\n"
+          - - "#!/bin/bash -xe "
+            - yum install ruby ntp wget java-1.8.0-openjdk-devel -y
+            - systemctl start ntpd
+            - systemctl enable ntpd
+            - groupadd tomcat
+            - useradd -M -s /bin/nologin -g tomcat -d /opt/tomcat tomcat
+            - cd /tmp
+            - wget http://apache.mirrors.pair.com/tomcat/tomcat-8/v8.5.35/bin/apache-tomcat-8.5.35.tar.gz
+            - mkdir /opt/tomcat
+            - tar xvf apache-tomcat-8*tar.gz -C /opt/tomcat --strip-components=1
+            - cd /opt/tomcat
+            - chgrp -R tomcat /opt/tomcat
+            - chmod -R g+r conf
+            - chmod g+x conf
+            - chown -R tomcat webapps/ work/ temp/ logs/
+            - cd /usr/lib/systemd/system
+            - touch tomcat.service
+            - echo '[Unit]' > tomcat.service
+            - echo 'Description=Apache Tomcat Web Application Container' >> tomcat.service
+            - echo 'After=syslog.target network.target' >> tomcat.service
+            - echo '[Service]' >> tomcat.service
+            - echo 'Type=forking' >> tomcat.service
+            - echo 'Environment=JAVA_HOME=/usr/lib/jvm/jre' >> tomcat.service
+            - echo 'Environment=CATALINA_PID=/opt/tomcat/temp/tomcat.pid' >> tomcat.service
+            - echo 'Environment=CATALINA_HOME=/opt/tomcat' >> tomcat.service
+            - echo 'Environment=CATALINA_BASE=/opt/tomcat' >> tomcat.service
+            - echo 'Environment="CATALINA_OPTS=-Xms512M -Xmx1024M -server -XX:+UseParallelGC"'
+              >> tomcat.service
+            - echo 'Environment="JAVA_OPTS=-Djava.awt.headless=true -Djava.security.egd=file:/dev/./urandom"'
+              >> tomcat.service
+            - echo 'ExecStart=/opt/tomcat/bin/startup.sh' >> tomcat.service
+            - echo 'ExecStop=/bin/kill -15 $MAINPID' >> tomcat.service
+            - echo 'User=tomcat' >> tomcat.service
+            - echo 'Group=tomcat' >> tomcat.service
+            - echo 'UMask=0007' >> tomcat.service
+            - echo 'RestartSec=10' >> tomcat.service
+            - echo 'Restart=always' >> tomcat.service
+            - echo '[Install]' >> tomcat.service
+            - echo 'WantedBy=multi-user.target' >> tomcat.service
+            - systemctl daemon-reload
+            - "#systemctl start cloudwatch.service"
+            - "#systemctl enable cloudwatch.service"
+            - systemctl enable tomcat.service
+            - systemctl start tomcat.service
+            - cd /home/centos/
+            - wget http://aws-codedeploy-us-east-1.s3.amazonaws.com/latest/install
+            - chmod +x ./install 
+            - ./install auto
+            - yum makecache -y
+            - yum install unzip -y
+            - wget https://s3.amazonaws.com/amazoncloudwatch-agent/linux/amd64/latest/AmazonCloudWatchAgent.zip
+            - unzip AmazonCloudWatchAgent.zip
+            - ./install.sh
+            - cd /opt/aws/amazon-cloudwatch-agent/bin/
+            - touch conf.json
+            - echo '{"agent":{"metrics_collection_interval":10,"logfile":"/var/logs/amazon-cloudwatch-agent.log"},"logs":{"logs_collected":{"files":{"collect_list":[{"file_path":"/opt/tomcat/logs/catalina.out","log_group_name":"csye6225_fall2018","log_stream_name":"webapp"}]}},"log_stream_name":"cloudwatch_log_stream"}}' >> conf.json
+            - ./amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:conf.json -s >> e.log
+            - cd /home/centos/
+      IamInstanceProfile: !Ref instanceProfile
+
+
+  WebAppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH, HTTP and HTTPS
+      VpcId: !Ref vpcID
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '8080'
+        ToPort: '8080'
+        CidrIp: 0.0.0.0/0
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: 'csye6225-fall2018-chengl.me.csye6225.com'
+      AccessControl: PublicRead    
+
+  myDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: 'userName'
+        AttributeType: 'S'
+      KeySchema:
+      - AttributeName: 'userName'
+        KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TableName: "UserTable"
+      TimeToLiveSpecification: 
+        AttributeName: 'TimeToLive'
+        Enabled: true
+
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable datebase.service port 3306
+      VpcId: !Ref vpcID
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '3306'
+        ToPort: '3306'
+        CidrIp: 0.0.0.0/0
+  myDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: csye6225 webApp
+      SubnetIds:
+      - !Ref subnetID1
+      - !Ref subnetID2
+      - !Ref subnetID3
+  MyDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: csye6225
+      AllocatedStorage: '5'
+      DBInstanceClass: db.t2.medium
+      DBInstanceIdentifier: 'leo-csye6225-spring2018'
+      Engine: MariaDB
+      MasterUsername: !Ref DBuserName
+      MasterUserPassword: !Ref DBpassword
+      DBSubnetGroupName: !Ref myDBSubnetGroup
+      VPCSecurityGroups:
+      - !Ref DBSecurityGroup
+
+  MyWebACL:
+    Properties:
+      Name:
+        Ref: WebACLName
+      DefaultAction:
+        Type: ALLOW
+      MetricName:
+        Ref: WebACLName
+      Rules:
+      - Action:
+          Type: BLOCK
+        Priority: 1
+        RuleId:
+          Ref: ManualIPBlockRule
+      - Action:
+          Type: BLOCK
+        Priority: 2
+        RuleId:
+          Ref: SizeMatchRule
+      - Action:
+          Type: BLOCK
+        Priority: 3
+        RuleId:
+          Ref: SqliRule
+      - Action:
+          Type: BLOCK
+        Priority: 4
+        RuleId:
+          Ref: XssRule
+    Type: AWS::WAFRegional::WebACL
+  SqliRule:
+    Properties:
+      Name:
+        Fn::Join:
+        - ''
+        - - Ref: WebACLName
+          - SqliRule
+      MetricName:
+        Fn::Join:
+        - ''
+        - - Ref: WebACLName
+          - SqliRule
+      Predicates:
+      - DataId:
+          Ref: SqliMatchSet
+        Negated: false
+        Type: SqlInjectionMatch
+    Type: AWS::WAFRegional::Rule
+  XssRule:
+    Properties:
+      Name:
+        Fn::Join:
+        - ''
+        - - Ref: WebACLName
+          - XssRule
+      MetricName:
+        Fn::Join:
+        - ''
+        - - Ref: WebACLName
+          - XssRule
+      Predicates:
+      - DataId:
+          Ref: XssMatchSet
+        Negated: false
+        Type: XssMatch
+    Type: AWS::WAFRegional::Rule
+  SizeMatchRule:
+    Properties:
+      Name:
+        Fn::Join:
+        - ''
+        - - Ref: WebACLName
+          - LargeBodyMatchRule
+      MetricName:
+        Fn::Join:
+        - ''
+        - - Ref: WebACLName
+          - DetectLargeBody
+      Predicates:
+      - DataId:
+          Ref: SizeMatchSet
+        Negated: false
+        Type: SizeConstraint
+    Type: AWS::WAFRegional::Rule
+  ManualIPBlockRule:
+    Properties:
+      Name:
+        Fn::Join:
+        - ''
+        - - Ref: WebACLName
+          - ManualIPBlockRule
+      MetricName:
+        Fn::Join:
+        - ''
+        - - Ref: WebACLName
+          - ManualIPBlockRule
+      Predicates:
+      - DataId:
+          Ref: WAFManualIPBlockSet
+        Negated: false
+        Type: IPMatch
+    Type: AWS::WAFRegional::Rule
+
+  
+  WAFManualIPBlockSet:
+    Properties:
+      Name: Manual IP Block Set
+    Type: AWS::WAFRegional::IPSet
+
+  SizeMatchSet:
+    Properties:
+      Name:
+        Fn::Join:
+        - ''
+        - - Ref: WebACLName
+          - LargeBodyMatch
+      SizeConstraints:
+      - FieldToMatch:
+          Type: BODY
+        ComparisonOperator: GT
+        Size: '200000'
+        TextTransformation: NONE
+    Type: AWS::WAFRegional::SizeConstraintSet
+
+  SqliMatchSet:
+    Properties:
+      Name:
+        Fn::Join:
+        - ''
+        - - Ref: WebACLName
+          - SqliMatch
+      SqlInjectionMatchTuples:
+      - FieldToMatch:
+          Type: QUERY_STRING
+        TextTransformation: URL_DECODE
+      - FieldToMatch:
+          Type: QUERY_STRING
+        TextTransformation: HTML_ENTITY_DECODE
+      - FieldToMatch:
+          Type: BODY
+        TextTransformation: URL_DECODE
+      - FieldToMatch:
+          Type: BODY
+        TextTransformation: HTML_ENTITY_DECODE
+      - FieldToMatch:
+          Type: URI
+        TextTransformation: URL_DECODE
+    Type: AWS::WAFRegional::SqlInjectionMatchSet
+
+  XssMatchSet:
+    Properties:
+      Name:
+        Fn::Join:
+        - ''
+        - - Ref: WebACLName
+          - XssMatch
+      XssMatchTuples:
+      - FieldToMatch:
+          Type: QUERY_STRING
+        TextTransformation: URL_DECODE
+      - FieldToMatch:
+          Type: QUERY_STRING
+        TextTransformation: HTML_ENTITY_DECODE
+      - FieldToMatch:
+          Type: BODY
+        TextTransformation: URL_DECODE
+      - FieldToMatch:
+          Type: BODY
+        TextTransformation: HTML_ENTITY_DECODE
+      - FieldToMatch:
+          Type: URI
+        TextTransformation: URL_DECODE
+    Type: AWS::WAFRegional::XssMatchSet
+
+  MyWebACLAssociation:
+    Type: AWS::WAFRegional::WebACLAssociation
+    Properties:
+      ResourceArn: 
+        Ref: ApplicationLoadBalancer
+      WebACLId:
+        Ref: MyWebACL
+
+Outputs:
+  DBEndPoint:
+    Value: 
+      Fn::GetAtt:
+      - MyDB
+      - Endpoint.Address
+    Description: MyDB endpoint address
+

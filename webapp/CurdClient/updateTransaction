@@ -1,0 +1,5 @@
+#!/bin/bash
+
+
+
+ curl -i "https://csye6225-fall2018-chengl.me:8080/csye6225Webapp-1.0-SNAPSHOT/transaction/13" -H "username:leoleoleocheng@gmail.com" -H "password:leo38377" -F receipt=@"receipt2.jpg" -F description="coke" -F merchant="starbucks" -F amount="1.00" -F date="09/29/2018" -F category="drink"

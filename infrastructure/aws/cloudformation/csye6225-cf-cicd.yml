@@ -1,0 +1,296 @@
+
+Resources:
+  EC2S3Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: Code-DeployEC2-S3-Policy
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action:
+          - s3:*
+          - cloudwatch:*
+          - ec2:*
+          - logs:*
+          - ssm:*
+          Resource: "*"
+      Roles:
+      - !Ref EC2ServiceRole 
+  
+  
+        #  CodeDeployPolicy:
+        #    Type: AWS::IAM::Policy
+        #    Properties:
+        #      PolicyName: CodeDeployPolicy
+        #      PolicyDocument:
+        #        Statement:
+        #        - Effect: Allow
+        #          Action:
+        #          - autoscaling:PutLifecycleHook
+        #          - autoscaling:DeleteLifecycleHook
+        #          - autoscaling:RecordLifecycleActionHeartbeat
+        #          - autoscaling:CompleteLifecycleAction
+        #          - autoscaling:DescribeAutoscalingGroups
+        #          - autoscaling:PutInstanceInStandby
+        #          - autoscaling:PutInstanceInService
+        #          - ec2:Describe*
+        #          Resource: "*"
+        #      Roles:
+        #      - !Ref CodeDeployServiceRole
+
+
+  TravisUploadToS3:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: Travis-Upload-To-S3
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action:
+          - s3:*
+          Resource: "*"
+      Users:
+      - !Ref CIUser
+
+  TravisToCodeDeploy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: Travis-To-CodeDeploy
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action:
+          - codedeploy:RegisterApplicationRevision
+          - codedeploy:GetApplicationRevision
+          - codedeploy:*
+          Resource:
+          - arn:aws:codedeploy:us-east-1:398590284929:application:MyCodeDeployApp
+        - Effect: Allow
+          Action:
+          - codedeploy:CreateDeployment
+          - codedeploy:GetDeployment
+          - codedeploy:*
+          Resource:
+          - "*"
+        - Effect: Allow
+          Action:
+          - codedeploy:GetDeploymentConfig
+          - codedeploy:*
+          Resource:
+          - arn:aws:codedeploy:us-east-1:398590284929:deploymentconfig:CodeDeployDefault.OneAtATime
+          - arn:aws:codedeploy:us-east-1:398590284929:deploymentconfig:CodeDeployDefault.HalfAtATime
+          - arn:aws:codedeploy:us-east-1:398590284929:deploymentconfig:CodeDeployDefault.AllAtOnce
+        - Effect: Allow
+          Action:
+          - SNS:Publish
+          Resource: arn:aws:sns:us-east-1:398590284929:Csye6225Topic
+        - Effect: Allow
+          Action:
+          - cloudwatch:*
+          - logs:*
+          Resource: "*"
+      Users:
+      - !Ref CIUser
+
+
+  CIUser:
+    Type: AWS::IAM::User
+ 
+
+  CIUserKeys:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName:
+        Ref: CIUser
+
+
+  EC2ServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - Ref: EC2ServiceRole
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: 'code-deploy.csye6225-fall2018-leocheng.me'
+      AccessControl: PublicRead
+
+
+
+
+
+
+
+  LambdaCIUser:
+    Type: AWS::IAM::User
+
+  LambdaCIUserKeys:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName:
+        Ref: LambdaCIUser
+
+
+  TravisToLambda:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: TravisCI-to-Lambda-S3-SES
+      PolicyDocument:
+        Statement:
+        - Sid: ListExistingRolesAndPolicies
+          Effect: Allow
+          Action:
+          - iam:ListRolePolicies
+          - iam:ListRoles
+          Resource: "*"
+        - Sid: CreateAndListFunctions
+          Effect: Allow
+          Action:
+          - lambda:CreateFunction
+          - lambda:ListFunctions
+          Resource: "*"
+        - Sid: DeployCode
+          Effect: Allow
+          Action:
+          - lambda:GetFunction
+          - lambda:UpdateFunctionCode
+          - lambda:UpdateFunctionConfiguration
+          Resource: "*"
+        - Sid: SetRole
+          Effect: Allow
+          Action:
+          - iam:PassRole
+          Resource: "*"
+        - Sid: SendEmail
+          Effect: Allow
+          Action:
+          - ses:*
+          Resource: "*"
+        - Sid: S3BucketPermission
+          Effect: Allow
+          Action:
+          - s3:*
+          Resource: "*"
+        - Sid: lambdaToDynamodb
+          Effect: Allow
+          Action:
+          - dynamodb:*
+          Resource: "*"
+      Users:
+      - !Ref LambdaCIUser
+
+
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      Policies:
+      - PolicyName: LambdaTravisCiCloudWatchS3SES
+        PolicyDocument:
+          Statement:
+          - Action:
+            - logs:*
+            Resource:
+            - arn:aws:logs:*:*:*
+            Effect: Allow
+          - Sid: ListExistingRolesAndPolicies
+            Effect: Allow
+            Action:
+            - iam:ListRolePolicies
+            - iam:ListRoles
+            Resource: "*"
+          - Sid: CreateAndListFunctions
+            Effect: Allow
+            Action:
+            - lambda:CreateFunction
+            - lambda:ListFunctions
+            Resource: "*"
+          - Sid: DeployCode
+            Effect: Allow
+            Action:
+            - lambda:GetFunction
+            - lambda:UpdateFunctionCode
+            - lambda:UpdateFunctionConfiguration
+            Resource: "*"
+          - Sid: SetRole
+            Effect: Allow
+            Action:
+            - iam:PassRole
+            Resource: "*"
+          - Sid: SendEmail
+            Effect: Allow
+            Action:
+            - ses:*
+            Resource: "*"
+          - Sid: S3BucketPermission
+            Effect: Allow
+            Action:
+            - s3:*
+            Resource: "*"
+          - Sid: lambdaToDynamodb
+            Effect: Allow
+            Action:
+            - dynamodb:*
+            Resource: "*"
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          
+Outputs:
+  EC2InstacneProfile:
+    Value:
+      Ref: InstanceProfile
+    Description: webapp EC2 Instance Profile
+  AccessKey:
+    Value:
+      Ref: CIUserKeys
+    Description: AWSAccessKeyId of travis ci user
+  SecretKey:
+    Value:
+      Fn::GetAtt:
+      - CIUserKeys
+      - SecretAccessKey
+    Description: AWSSecretKey of travis ci user
+  LambdaAccessKey:
+    Value:
+      Ref: LambdaCIUserKeys
+    Description: AWSAccessKeyId of travis ci to lambda user
+  LambdaSecretKey:
+    Value:
+      Fn::GetAtt:
+      - LambdaCIUserKeys
+      - SecretAccessKey
+    Description: AWSSecretKey of travis ci to lambda user
+  LambdaExecuationRole:
+    Value:
+      Fn::GetAtt:
+      - LambdaExecutionRole
+      - Arn
+    Description: Role ARN for travis ci lambda-deployment user
+
+
+
+
+
+

@@ -1,0 +1,5 @@
+#!/bin/bash
+
+
+
+curl -i "https://csye6225-fall2018-chengl.me:8080/csye6225Webapp-1.0-SNAPSHOT/reset" -H "username:leoleoleocheng@gmail.com" -H "password:leo38377"

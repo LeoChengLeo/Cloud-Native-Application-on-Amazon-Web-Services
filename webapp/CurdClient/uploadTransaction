@@ -1,0 +1,9 @@
+#!/bin/bash
+
+
+
+curl -iXPOST "https://csye6225-fall2018-chengl.me:8080/csye6225Webapp-1.0-SNAPSHOT/transaction" -H "username:leoleoleocheng@gmail.com" -H "password:leo38377" -F receipt=@"receipt.jpg" -F description="coffee" -F merchant="starbucks" -F amount="2.69" -F date="09/25/2018" -F category="drink"
+
+
+
+
