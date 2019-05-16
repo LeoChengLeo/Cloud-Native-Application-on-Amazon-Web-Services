@@ -1,4 +1,4 @@
 #!/bin/bash
 
 
-curl -iXDELETE "https://csye6225-fall2018-chengl.me:8080/csye6225Webapp-1.0-SNAPSHOT/transaction/49/attachment/51" -H "username:leoleoleocheng@gmail.com" -H "password:leo38377"
+curl -iXDELETE "https://csye6225-fall2018-chengl.me:8080/csye6225Webapp-1.0-SNAPSHOT/transaction/49/attachment/51" -H "username:leoleoleocheng@gmail.com" -H "password:xxxxxxxx"
