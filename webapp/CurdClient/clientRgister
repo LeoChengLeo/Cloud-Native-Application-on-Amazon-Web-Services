@@ -1,4 +1,4 @@
 #!/bin/bash
 
 
-curl -iXPOST "https://csye6225-fall2018-chengl.me:8080/csye6225Webapp-1.0-SNAPSHOT/user/register" -H "username:leoleoleocheng@gmail.com" -H "password:leo38377"
+curl -iXPOST "https://csye6225-fall2018-chengl.me:8080/csye6225Webapp-1.0-SNAPSHOT/user/register" -H "username:leoleoleocheng@gmail.com" -H "password:xxxxxxx"
